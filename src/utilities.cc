@@ -529,6 +529,19 @@ void walkHandle(uv_handle_t* h, void* arg) {
 }
 
 /*******************************************************************************
+ * Utility function to print out the contents of a character buffer
+ ******************************************************************************/
+void WriteBuffer(int fd, const char* buffer) {
+  if (write(fd, buffer, strlen(buffer)) < 0) {
+    char console[80];
+    snprintf(console, sizeof(console), "Failure writing Node.js report file: %s, errno: %d\n", report_filename, errno);
+    if (write(STDERR_FILENO, console, strlen(console)) < 0) {
+      // ignore
+    }
+  }
+}
+
+/*******************************************************************************
  * Utility function to print out integer values with commas for readability.
  ******************************************************************************/
 void WriteInteger(std::ostream& out, size_t value) {
@@ -553,6 +566,15 @@ void WriteInteger(std::ostream& out, size_t value) {
     if (i > 0) {
       out << ",";
     }
+  }
+}
+
+/*******************************************************************************
+ * Utility function to print out the contents of a character buffer
+ ******************************************************************************/
+void WriteError(char* buffer) {
+  if (write(STDERR_FILENO, buffer, strlen(buffer)) < 0) {
+    // ignore
   }
 }
 

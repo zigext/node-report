@@ -5,6 +5,7 @@
 #include <fcntl.h>
 #include <string.h>
 #include <fstream>
+#include <unistd.h>
 
 #if !defined(_MSC_VER)
 #include <strings.h>
@@ -59,13 +60,13 @@ using v8::String;
 using v8::V8;
 
 // Internal/static function declarations
-static void WriteNodeReport(Isolate* isolate, DumpEvent event, const char* message, const char* location, char* filename, std::ostream &out, MaybeLocal<Value> error, TIME_TYPE* time);
-static void PrintCommandLine(std::ostream& out);
-static void PrintVersionInformation(std::ostream& out);
-static void PrintJavaScriptStack(std::ostream& out, Isolate* isolate, DumpEvent event, const char* location);
+static void WriteNodeReport(Isolate* isolate, DumpEvent event, const char* message, const char* location, char* filename, int fd, MaybeLocal<Value> error, TIME_TYPE* time);
+static void PrintCommandLine(int fd);
+static void PrintVersionInformation(int fd);
+static void PrintJavaScriptStack(int fd, Isolate* isolate, DumpEvent event, const char* location);
 static void PrintJavaScriptErrorStack(std::ostream& out, Isolate* isolate, MaybeLocal<Value> error);
-static void PrintStackFromStackTrace(std::ostream& out, Isolate* isolate, DumpEvent event);
-static void PrintStackFrame(std::ostream& out, Isolate* isolate, Local<StackFrame> frame, int index, void* pc);
+static void PrintStackFromStackTrace(int fd, Isolate* isolate, DumpEvent event);
+static void PrintStackFrame(int fd, Isolate* isolate, Local<StackFrame> frame, int index, void* pc);
 static void PrintNativeStack(std::ostream& out);
 #ifndef _WIN32
 static void PrintResourceUsage(std::ostream& out);
@@ -108,6 +109,7 @@ void TriggerNodeReport(Isolate* isolate, DumpEvent event, const char* message, c
   localtime_r(&time_val.tv_sec, &tm_struct);
   pid_t pid = getpid();
 #endif
+  char console_buf[80];
 
   // Determine the required report filename. In order of priority:
   //   1) supplied on API 2) configured on startup 3) default generated
@@ -137,15 +139,15 @@ void TriggerNodeReport(Isolate* isolate, DumpEvent event, const char* message, c
 #endif
   }
 
-  // Open the report file stream for writing. Supports stdout/err, user-specified or (default) generated name
-  std::ofstream outfile;
-  std::ostream* outstream = &std::cout;
+  // Open the report file for writing. Supports stdout/err, user-specified or (default) generated name
+  int fd = -1;
   if (!strncmp(filename, "stdout", sizeof("stdout") - 1)) {
-    outstream = &std::cout;
+    fd = STDOUT_FILENO;
   } else if (!strncmp(filename, "stderr", sizeof("stderr") - 1)) {
-    outstream = &std::cerr;
+    fd = STDERR_FILENO;
   } else {
     // Regular file. Append filename to directory path if one was specified
+    mode_t mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH;
     if (strlen(report_directory) > 0) {
       char pathname[NR_MAXPATH + NR_MAXNAME + 1] = "";
 #ifdef _WIN32
@@ -153,12 +155,12 @@ void TriggerNodeReport(Isolate* isolate, DumpEvent event, const char* message, c
 #else
       snprintf(pathname, sizeof(pathname), "%s%s%s", report_directory, "/", filename);
 #endif
-      outfile.open(pathname, std::ios::out);
+      fd = open(pathname, O_WRONLY | O_CREAT, mode);
     } else {
-      outfile.open(filename, std::ios::out);
+      fd = open(filename, O_WRONLY | O_CREAT, mode);
     }
     // Check for errors on the file open
-    if (!outfile.is_open()) {
+    if (fd == -1) {
       if (strlen(report_directory) > 0) {
         std::cerr << "\nFailed to open Node.js report file: " << filename << " directory: " << report_directory << " (errno: " << errno << ")\n";
       } else {
@@ -166,21 +168,20 @@ void TriggerNodeReport(Isolate* isolate, DumpEvent event, const char* message, c
       }
       return;
     } else {
-      std::cerr << "\nWriting Node.js report to file: " << filename << "\n";
+      snprintf(console_buf, sizeof(console_buf), "%s%s%s", "Writing Node.js report to file: ", filename, "\n");
+      WriteError(console_buf);
     }
   }
 
-  // Pass our stream about by reference, not by copying it.
-  std::ostream &out = outfile.is_open() ? outfile : *outstream;
-
-  WriteNodeReport(isolate, event, message, location, filename, out, error, &tm_struct);
+  WriteNodeReport(isolate, event, message, location, filename, fd, error, &tm_struct);
 
   // Do not close stdout/stderr, only close files we opened.
-  if(outfile.is_open()) {
-    outfile.close();
+  if (fd != STDOUT_FILENO && fd != STDERR_FILENO) {
+    close(fd);
   }
 
-  std::cerr << "Node.js report completed\n";
+  snprintf(console_buf, sizeof(console_buf), "%s", "Node.js report completed\n");
+  WriteError(console_buf);
   if (name != nullptr) {
     snprintf(name, NR_MAXNAME + 1, "%s", filename);  // return the report file name
   }
@@ -201,107 +202,103 @@ void GetNodeReport(Isolate* isolate, DumpEvent event, const char* message, const
   gettimeofday(&time_val, nullptr);
   localtime_r(&time_val.tv_sec, &tm_struct);
 #endif
-  WriteNodeReport(isolate, event, message, location, nullptr, out, error, &tm_struct);
+  //WriteNodeReport(isolate, event, message, location, nullptr, out, error, &tm_struct);
 }
 
 /*******************************************************************************
  * Internal function to coordinate and write the various sections of the node
  * report to the supplied stream
  *******************************************************************************/
-static void WriteNodeReport(Isolate* isolate, DumpEvent event, const char* message, const char* location, char* filename, std::ostream &out, MaybeLocal<Value> error, TIME_TYPE* tm_struct) {
+static void WriteNodeReport(Isolate* isolate, DumpEvent event, const char* message, const char* location, char* filename, int fd, MaybeLocal<Value> error, TIME_TYPE* tm_struct) {
 
 #ifdef _WIN32
   DWORD pid = GetCurrentProcessId();
 #else  // UNIX, OSX
   pid_t pid = getpid();
 #endif
-
-  // Save formatting for output stream.
-  std::ios oldState(nullptr);
-  oldState.copyfmt(out);
+  char line_buf[1024];
 
   // File stream opened OK, now start printing the report content, starting with the title
   // and header information (event, filename, timestamp and pid)
-  out << "================================================================================\n";
-  out << "==== Node Report ===============================================================\n";
-  out << "\nEvent: " << message << ", location: \"" << location << "\"\n";
-  if( filename != nullptr ) {
-    out << "Filename: " << filename << "\n";
+  WriteBuffer(fd, "================================================================================\n");
+  WriteBuffer(fd, "==== Node Report ===============================================================\n");
+  snprintf(line_buf, sizeof(line_buf), "\nEvent: %s, location: \"%s\"\n", message, location);
+  WriteBuffer(fd, line_buf);
+  if (filename != nullptr) {
+    snprintf(line_buf, sizeof(line_buf), "Filename: %s\n", filename);
   }
+  WriteBuffer(fd, line_buf);
 
   // Print dump event and module load date/time stamps
-  char timebuf[64];
 #ifdef _WIN32
-  snprintf(timebuf, sizeof(timebuf), "%4d/%02d/%02d %02d:%02d:%02d",
+  snprintf(line_buf, sizeof(line_buf), "Dump event time: %4d/%02d/%02d %02d:%02d:%02d\n",
           tm_struct->wYear, tm_struct->wMonth, tm_struct->wDay,
           tm_struct->wHour, tm_struct->wMinute, tm_struct->wSecond);
-  out << "Dump event time:  "<< timebuf << "\n";
-  snprintf(timebuf, sizeof(timebuf), "%4d/%02d/%02d %02d:%02d:%02d",
+  write(fd, line_buf, strlen(line_buf));
+  snprintf(line_buf, sizeof(line_buf), "Module load time: %4d/%02d/%02d %02d:%02d:%02d\n",
           loadtime_tm_struct.wYear, loadtime_tm_struct.wMonth, loadtime_tm_struct.wDay,
           loadtime_tm_struct.wHour, loadtime_tm_struct.wMinute, loadtime_tm_struct.wSecond);
-  out << "Module load time: " << timebuf << "\n";
+  write(fd, line_buf, strlen(line_buf));
 #else  // UNIX, OSX
-  snprintf(timebuf, sizeof(timebuf), "%4d/%02d/%02d %02d:%02d:%02d",
+  snprintf(line_buf, sizeof(line_buf), "Dump event time: %4d/%02d/%02d %02d:%02d:%02d\n",
           tm_struct->tm_year+1900, tm_struct->tm_mon+1, tm_struct->tm_mday,
           tm_struct->tm_hour, tm_struct->tm_min, tm_struct->tm_sec);
-  out << "Dump event time:  "<< timebuf << "\n";
-      snprintf(timebuf, sizeof(timebuf), "%4d/%02d/%02d %02d:%02d:%02d",
+  WriteBuffer(fd, line_buf);
+  snprintf(line_buf, sizeof(line_buf), "Module load time: %4d/%02d/%02d %02d:%02d:%02d\n",
           loadtime_tm_struct.tm_year+1900, loadtime_tm_struct.tm_mon+1, loadtime_tm_struct.tm_mday,
           loadtime_tm_struct.tm_hour, loadtime_tm_struct.tm_min, loadtime_tm_struct.tm_sec);
-  out << "Module load time: " << timebuf << "\n";
+  WriteBuffer(fd, line_buf);
 #endif
   // Print native process ID
-  out << "Process ID: " << pid << std::endl;
+  snprintf(line_buf, sizeof(line_buf), "Process ID: %d\n", pid);
+  WriteBuffer(fd, line_buf);
 
 
   // Print out the command line.
-  PrintCommandLine(out);
-  out << std::flush;
+  PrintCommandLine(fd);
+  fsync(fd);
 
   // Print Node.js and OS version information
-  PrintVersionInformation(out);
-  out << std::flush;
+  PrintVersionInformation(fd);
+  fsync(fd);
 
-// Print summary JavaScript stack backtrace
-  PrintJavaScriptStack(out, isolate, event, location);
-  out << std::flush;
+  // Print summary JavaScript stack backtrace
+  //PrintJavaScriptStack(out, isolate, event, location);
+  fsync(fd);
 
   // Print native stack backtrace
-  PrintNativeStack(out);
-  out << std::flush;
+  //PrintNativeStack(out);
+  //out << std::flush;
 
   // Print the stack trace and message from the Error object.
   // (If one was provided.)
-  PrintJavaScriptErrorStack(out, isolate, error);
-  out << std::flush;
+  //PrintJavaScriptErrorStack(out, isolate, error);
+  //out << std::flush;
 
   // Print V8 Heap and Garbage Collector information
-  PrintGCStatistics(out, isolate);
-  out << std::flush;
+  //PrintGCStatistics(out, isolate);
+  //out << std::flush;
 
   // Print OS and current thread resource usage
 #ifndef _WIN32
-  PrintResourceUsage(out);
-  out << std::flush;
+  //PrintResourceUsage(out);
+  //out << std::flush;
 #endif
 
   // Print libuv handle summary
-  out << "\n================================================================================";
-  out << "\n==== Node.js libuv Handle Summary ==============================================\n";
-  out << "\n(Flags: R=Ref, A=Active)\n";
-  out << std::left << std::setw(7) << "Flags" << std::setw(10) << "Type"
-      << std::setw(4 + 2 * sizeof(void*)) << "Address" << "Details"
-      << std::endl;
-  uv_walk(uv_default_loop(), walkHandle, (void*)&out);
+  //out << "\n================================================================================";
+  //out << "\n==== Node.js libuv Handle Summary ==============================================\n";
+  //out << "\n(Flags: R=Ref, A=Active)\n";
+  //out << std::left << std::setw(7) << "Flags" << std::setw(10) << "Type"
+  //    << std::setw(4 + 2 * sizeof(void*)) << "Address" << "Details"
+  //    << std::endl;
+  //uv_walk(uv_default_loop(), walkHandle, (void*)&out);
 
   // Print operating system information
-  PrintSystemInformation(out, isolate);
+  //PrintSystemInformation(out, isolate);
 
-  out << "\n================================================================================\n";
-  out << std::flush;
-
-  // Restore output stream formatting.
-  out.copyfmt(oldState);
+  //out << "\n================================================================================\n";
+  //out << std::flush;
 
   report_active = false;
 }
@@ -310,9 +307,11 @@ static void WriteNodeReport(Isolate* isolate, DumpEvent event, const char* messa
  * Function to print process command line.
  *
  ******************************************************************************/
-static void PrintCommandLine(std::ostream& out) {
+static void PrintCommandLine(int fd) {
+  char line_buf[2048];
   if (commandline_string != "") {
-    out << "Command line: " << commandline_string << "\n";
+    snprintf(line_buf, sizeof(line_buf), "Command line: \"%s\"\n", commandline_string.c_str());
+    WriteBuffer(fd, line_buf);
   }
 }
 
@@ -320,20 +319,24 @@ static void PrintCommandLine(std::ostream& out) {
  * Function to print Node.js version, OS version and machine information
  *
  ******************************************************************************/
-static void PrintVersionInformation(std::ostream& out) {
-
+static void PrintVersionInformation(int fd) {
+  char line_buf[2048];
   // Print Node.js and deps component versions
-  out << "\n" << version_string;
+  snprintf(line_buf, sizeof(line_buf), "\n%s", version_string.c_str());
+  WriteBuffer(fd, line_buf);
 
   // Print node-report module version
   // e.g. node-report version: 1.0.6 (built against Node.js v6.9.1)
-  out << std::endl << "node-report version: " << NODEREPORT_VERSION
-      << " (built against Node.js v" << NODE_VERSION_STRING;
+  snprintf(line_buf, sizeof(line_buf), "\nnode-report version: %s (built against Node.js v%s",
+           NODEREPORT_VERSION, NODE_VERSION_STRING);
+  WriteBuffer(fd, line_buf);
 #if defined(__GLIBC__)
-  out << ", glibc " << __GLIBC__ << "." << __GLIBC_MINOR__;
+  snprintf(line_buf, sizeof(line_buf), " glibc %d.%d", __GLIBC__, __GLIBC_MINOR__);
+  WriteBuffer(fd, line_buf);
 #endif
   // Print Process word size
-  out << ", " << sizeof(void *) * 8 << " bit" << ")" << std::endl;
+  snprintf(line_buf, sizeof(line_buf), ", %d bit)\n", (int)(sizeof(void *) * 8));
+  WriteBuffer(fd, line_buf);
 
   // Print operating system and machine information (Windows)
 #ifdef _WIN32
@@ -417,15 +420,18 @@ static void PrintVersionInformation(std::ostream& out) {
     out << "\nOS version: " << os_info.sysname << " " << os_info.version << "."
         << os_info.release << "\n";
 #else
-    out << "\nOS version: " << os_info.sysname << " " << os_info.release << " "
-        << os_info.version << "\n";
+    snprintf(line_buf, sizeof(line_buf), "\nOS version: %s %s %s\n",
+             os_info.sysname, os_info.release, os_info.version);
+    WriteBuffer(fd, line_buf);
 #endif
     const char *(*libc_version)();
     *(void**)(&libc_version) = dlsym(RTLD_DEFAULT, "gnu_get_libc_version");
     if (libc_version != NULL) {
-      out << "(glibc: " << (*libc_version)() << ")" << std::endl;
+      snprintf(line_buf, sizeof(line_buf), "(glibc: %s)\n", (*libc_version)());
+      WriteBuffer(fd, line_buf);
     }
-    out <<  "\nMachine: " << os_info.nodename << " " << os_info.machine << "\n";
+    snprintf(line_buf, sizeof(line_buf), "\nMachine: %s %s\n", os_info.nodename, os_info.machine);
+    WriteBuffer(fd, line_buf);
   }
 #endif
 }
@@ -434,9 +440,9 @@ static void PrintVersionInformation(std::ostream& out) {
  * Function to print the JavaScript stack, if available
  *
  ******************************************************************************/
-static void PrintJavaScriptStack(std::ostream& out, Isolate* isolate, DumpEvent event, const char* location) {
-  out << "\n================================================================================";
-  out << "\n==== JavaScript Stack Trace ====================================================\n\n";
+static void PrintJavaScriptStack(int fd, Isolate* isolate, DumpEvent event, const char* location) {
+  WriteBuffer(fd, "\n================================================================================");
+  WriteBuffer(fd, "\n==== JavaScript Stack Trace ====================================================\n\n");
 
 #ifdef _WIN32
   switch (event) {
@@ -461,22 +467,22 @@ static void PrintJavaScriptStack(std::ostream& out, Isolate* isolate, DumpEvent 
       std::fflush(stack_fp);
       std::rewind(stack_fp);
       while (std::fgets(stack_buf, sizeof(stack_buf), stack_fp) != nullptr) {
-        out << stack_buf;
+        WriteBuffer(fd, stack_buf);
       }
       // Calling close on a file from tmpfile *should* delete it.
       std::fclose(stack_fp);
     } else {
-      out << "No stack trace available, unable to create temporary file\n";
+      WriteBuffer(fd, "No stack trace available, unable to create temporary file\n");
     }
     break;
   }
   case kFatalError:
-    out << "No stack trace available\n";
+    WriteBuffer(fd, "No stack trace available\n");
     break;
   case kSignal_JS:
   case kSignal_UV:
     // Print the stack using StackTrace::StackTrace() and GetStackSample() APIs
-    PrintStackFromStackTrace(out, isolate, event);
+    PrintStackFromStackTrace(fd, isolate, event);
     break;
   }  // end switch(event)
 #endif
@@ -486,30 +492,32 @@ static void PrintJavaScriptStack(std::ostream& out, Isolate* isolate, DumpEvent 
  * Function to print a JavaScript stack from an error object
  *
  ******************************************************************************/
-static void PrintJavaScriptErrorStack(std::ostream& out, Isolate* isolate, MaybeLocal<Value> error) {
+static void PrintJavaScriptErrorStack(int fd, Isolate* isolate, MaybeLocal<Value> error) {
+  char line_buf[2048];
+
   if (error.IsEmpty() || !error.ToLocalChecked()->IsNativeError()) {
     return;
   }
 
-  out << "\n================================================================================";
-  out << "\n==== JavaScript Exception Details ==============================================\n\n";
+  WriteBuffer(fd, "\n================================================================================");
+  WriteBuffer(fd, "\n==== JavaScript Exception Details ==============================================\n\n");
 #if NODE_MAJOR_VERSION > 5
   Local<Message> message = v8::Exception::CreateMessage(isolate, error.ToLocalChecked());
 #else
   Local<Message> message = v8::Exception::CreateMessage(error.ToLocalChecked());
 #endif
   Nan::Utf8String message_str(message->Get());
-
-  out << *message_str << "\n\n";
+  snprintf(line_buf, sizeof(line_buf), "%s\n\n", *message_str);
+  WriteBuffer(fd, line_buf);
 
   Local<StackTrace> stack = v8::Exception::GetStackTrace(error.ToLocalChecked());
   if (stack.IsEmpty()) {
-     out << "No stack trace available from Exception::GetStackTrace()\n";
+     WriteBuffer(fd, "No stack trace available from Exception::GetStackTrace()\n");
      return;
   }
   // Print the stack trace, samples are not available as the exception isn't from the current stack.
   for (int i = 0; i < stack->GetFrameCount(); i++) {
-    PrintStackFrame(out, isolate, stack->GetFrame(i), i, nullptr);
+    PrintStackFrame(fd, isolate, stack->GetFrame(i), i, nullptr);
   }
 }
 
@@ -517,10 +525,11 @@ static void PrintJavaScriptErrorStack(std::ostream& out, Isolate* isolate, Maybe
  * Function to print stack using GetStackSample() and StackTrace::StackTrace()
  *
  ******************************************************************************/
-static void PrintStackFromStackTrace(std::ostream& out, Isolate* isolate, DumpEvent event) {
+static void PrintStackFromStackTrace(int fd, Isolate* isolate, DumpEvent event) {
   v8::RegisterState state;
   v8::SampleInfo info;
   void* samples[255];
+  char line_buf[2048];
 
   // Initialise the register state
   state.pc = nullptr;
@@ -529,25 +538,26 @@ static void PrintStackFromStackTrace(std::ostream& out, Isolate* isolate, DumpEv
 
   isolate->GetStackSample(state, samples, arraysize(samples), &info);
   if (static_cast<size_t>(info.vm_state) < arraysize(v8_states)) {
-    out << "JavaScript VM state: " << v8_states[info.vm_state] << "\n\n";
+    snprintf(line_buf, sizeof(line_buf), "JavaScript VM state: %s\n\n", v8_states[info.vm_state]);
+    WriteBuffer(fd, line_buf);
   } else {
-    out << "JavaScript VM state: <unknown>\n\n";
+    WriteBuffer(fd, "JavaScript VM state: <unknown>\n\n");
   }
   if (event == kSignal_UV) {
-    out << "Signal received when event loop idle, no stack trace available\n";
+    WriteBuffer("Signal received when event loop idle, no stack trace available\n");
     return;
   }
   Local<StackTrace> stack = StackTrace::CurrentStackTrace(isolate, 255, StackTrace::kDetailed);
   if (stack.IsEmpty()) {
-    out << "\nNo stack trace available from StackTrace::CurrentStackTrace()\n";
+    WriteBuffer("\nNo stack trace available from StackTrace::CurrentStackTrace()\n");
     return;
   }
   // Print the stack trace, adding in the pc values from GetStackSample() if available
   for (int i = 0; i < stack->GetFrameCount(); i++) {
     if (static_cast<size_t>(i) < info.frames_count) {
-      PrintStackFrame(out, isolate, stack->GetFrame(i), i, samples[i]);
+      PrintStackFrame(fd, isolate, stack->GetFrame(i), i, samples[i]);
     } else {
-      PrintStackFrame(out, isolate, stack->GetFrame(i), i, nullptr);
+      PrintStackFrame(fd, isolate, stack->GetFrame(i), i, nullptr);
     }
   }
 }
@@ -556,45 +566,45 @@ static void PrintStackFromStackTrace(std::ostream& out, Isolate* isolate, DumpEv
  * Function to print a JavaScript stack frame from a V8 StackFrame object
  *
  ******************************************************************************/
-static void PrintStackFrame(std::ostream& out, Isolate* isolate, Local<StackFrame> frame, int i, void* pc) {
+static void PrintStackFrame(int fd, Isolate* isolate, Local<StackFrame> frame, int i, void* pc) {
   Nan::Utf8String fn_name_s(frame->GetFunctionName());
   Nan::Utf8String script_name(frame->GetScriptName());
   const int line_number = frame->GetLineNumber();
   const int column = frame->GetColumn();
-  char buf[64];
+  char buf[2048];
 
   // First print the frame index and the instruction address
   if (pc != nullptr) {
 #ifdef _WIN32
-    snprintf( buf, sizeof(buf), "%2d: [pc=0x%p] ", i, pc);
+    snprintf(buf, sizeof(buf), "%2d: [pc=0x%p] ", i, pc);
 #else
-    snprintf( buf, sizeof(buf), "%2d: [pc=%p] ", i, pc);
+    snprintf(buf, sizeof(buf), "%2d: [pc=%p] ", i, pc);
 #endif
-    out << buf;
+    WriteBuffer(fd, buf);
   }
 
   // Now print the JavaScript function name and source information
   if (frame->IsEval()) {
     if (frame->GetScriptId() == Message::kNoScriptIdInfo) {
-      out << "at [eval]:" << line_number << ":" << column << "\n";
+      snprintf(buf, sizeof(buf), "at [eval]:%d:%d\n", line_number, column);
     } else {
-      out << "at [eval] (" << *script_name << ":" << line_number << ":"
-          << column << ")\n";
+      snprintf(buf, sizeof(buf), "at [eval] (%s:%d:%d\n", *script_name,
+               line_number, column);
     }
+    WriteBuffer(fd, buf);
     return;
   }
 
   if (fn_name_s.length() == 0) {
-    out << *script_name << ":" << line_number << ":" << column << "\n";
+    snprintf(buf, sizeof(buf), "%s:%d:%d\n", *script_name, line_number, column);
   } else {
     if (frame->IsConstructor()) {
-      out << *fn_name_s << " [constructor] (" << *script_name << ":"
-          << line_number << ":" << column << ")\n";
+      snprintf(buf, sizeof(buf), "%s [constructor] (%s:%d:%d\n", *fn_name_s, *script_name, line_number, column);
     } else {
-      out << *fn_name_s << " (" << *script_name << ":" << line_number << ":"
-          << column << ")\n";
+      snprintf(buf, sizeof(buf), "%s (%s:%d:%d\n", *fn_name_s, *script_name, line_number, column);
     }
   }
+  WriteBuffer(fd, buf);
 }
 
 

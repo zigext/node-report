@@ -71,7 +71,9 @@ void SetCommandLine();
 void reportEndpoints(uv_handle_t* h, std::ostringstream& out);
 void reportPath(uv_handle_t* h, std::ostringstream& out);
 void walkHandle(uv_handle_t* h, void* arg);
+void WriteBuffer(int fd, const char* buffer);
 void WriteInteger(std::ostream& out, size_t value);
+void WriteError(char* buffer);
 
 // Global variable declarations - definitions are in src/node-report.c
 extern char report_filename[NR_MAXNAME + 1];

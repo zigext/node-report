@@ -41,7 +41,6 @@ static bool signal_thread_initialised = false;
 
 static v8::Isolate* node_isolate;
 extern std::string version_string;
-extern std::string commandline_string;
 
 /*******************************************************************************
  * External JavaScript API for triggering a report
