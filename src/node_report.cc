@@ -32,9 +32,9 @@
 #ifdef _AIX
 #include <sys/ldr.h>  // ld_info structure
 #endif
-// Include execinfo.h for the native backtrace API. The API is unavailable on AIX
+// Include execinfo.h for the native backtrace API. The API is unavailable on AIX, zOS
 // and on some Linux distributions, e.g. Alpine Linux.
-#if !defined(_AIX) && !(defined(__linux__) && !defined(__GLIBC__))
+#if !defined(_AIX) && !(defined(__linux__) && !defined(__GLIBC__)) && !defined(__MVS__)
 #include <execinfo.h>
 #endif
 #include <sys/utsname.h>
@@ -420,11 +420,13 @@ static void PrintVersionInformation(std::ostream& out) {
     out << "\nOS version: " << os_info.sysname << " " << os_info.release << " "
         << os_info.version << "\n";
 #endif
+#if !defined(__MVS__)
     const char *(*libc_version)();
     *(void**)(&libc_version) = dlsym(RTLD_DEFAULT, "gnu_get_libc_version");
     if (libc_version != NULL) {
       out << "(glibc: " << (*libc_version)() << ")" << std::endl;
     }
+#endif
     out <<  "\nMachine: " << os_info.nodename << " " << os_info.machine << "\n";
   }
 #endif
@@ -651,6 +653,16 @@ void PrintNativeStack(std::ostream& out) {
   out << "\n==== Native Stack Trace ========================================================\n\n";
   out << "Native stack trace not supported on AIX\n";
 }
+#elif __MVS__
+/*******************************************************************************
+ * Function to print a native stack backtrace - zOS
+ *
+ ******************************************************************************/
+void PrintNativeStack(std::ostream& out) {
+  out << "\n================================================================================";
+  out << "\n==== Native Stack Trace ========================================================\n\n";
+  out << "Native stack trace not supported on zOS\n";
+}
 #elif (defined(__linux__) && !defined(__GLIBC__))
 /*******************************************************************************
  * Function to print a native stack backtrace - Alpine Linux etc
@@ -774,7 +786,7 @@ static void PrintResourceUsage(std::ostream& out) {
   struct rusage stats;
   out << "\nProcess total resource usage:";
   if (getrusage(RUSAGE_SELF, &stats) == 0) {
-#if defined(__APPLE__) || defined(_AIX)
+#if defined(__APPLE__) || defined(_AIX) || defined(__MVS__)
     snprintf( buf, sizeof(buf), "%ld.%06d", stats.ru_utime.tv_sec, stats.ru_utime.tv_usec);
     out << "\n  User mode CPU: " << buf << " secs";
     snprintf( buf, sizeof(buf), "%ld.%06d", stats.ru_stime.tv_sec, stats.ru_stime.tv_usec);
@@ -788,12 +800,14 @@ static void PrintResourceUsage(std::ostream& out) {
     cpu_abs = stats.ru_utime.tv_sec + 0.000001 * stats.ru_utime.tv_usec + stats.ru_stime.tv_sec + 0.000001 *  stats.ru_stime.tv_usec;
     cpu_percentage = (cpu_abs / uptime) * 100.0;
     out << "\n  Average CPU Consumption : "<< cpu_percentage << "%";
+#if !defined(__MVS__)
     out << "\n  Maximum resident set size: ";
     WriteInteger(out, stats.ru_maxrss * 1024);
     out << " bytes\n  Page faults: " << stats.ru_majflt << " (I/O required) "
         << stats.ru_minflt << " (no I/O required)";
     out << "\n  Filesystem activity: " << stats.ru_inblock << " reads "
         <<  stats.ru_oublock << " writes";
+#endif
   }
 #ifdef RUSAGE_THREAD
   out << "\n\nEvent loop thread resource usage:";
@@ -861,16 +875,16 @@ const static struct {
   {"core file size (blocks)       ", RLIMIT_CORE},
   {"data seg size (kbytes)        ", RLIMIT_DATA},
   {"file size (blocks)            ", RLIMIT_FSIZE},
-#if !(defined(_AIX) || defined(__sun))
+#if !(defined(_AIX) || defined(__sun) || defined(__MVS__))
   {"max locked memory (bytes)     ", RLIMIT_MEMLOCK},
 #endif
-#ifndef __sun
+#if !(defined(__sun) || defined(__MVS__))
   {"max memory size (kbytes)      ", RLIMIT_RSS},
 #endif
   {"open files                    ", RLIMIT_NOFILE},
   {"stack size (bytes)            ", RLIMIT_STACK},
   {"cpu time (seconds)            ", RLIMIT_CPU},
-#ifndef __sun
+#if !(defined(__sun) || defined(__MVS__))
   {"max user processes            ", RLIMIT_NPROC},
 #endif
   {"virtual memory (kbytes)       ", RLIMIT_AS}
@@ -886,7 +900,7 @@ const static struct {
       if (limit.rlim_cur == RLIM_INFINITY) {
         out << "       unlimited";
       } else {
-#if defined(_AIX) || defined(__sun)
+#if defined(_AIX) || defined(__sun) || defined(__MVS__)
         snprintf(buf, sizeof(buf), "%16ld", limit.rlim_cur);
         out << buf;
 #elif (defined(__linux__) && !defined(__GLIBC__))
@@ -900,7 +914,7 @@ const static struct {
       if (limit.rlim_max == RLIM_INFINITY) {
         out << "       unlimited\n";
       } else {
-#if defined(_AIX)
+#if defined(_AIX) || defined(__MVS__)
         snprintf(buf, sizeof(buf), "%16ld\n", limit.rlim_max);
         out << buf;
 #elif (defined(__linux__) && !defined(__GLIBC__))

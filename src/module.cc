@@ -235,6 +235,7 @@ static void PrintStackFromStackTrace(Isolate* isolate, FILE* fp) {
 }
 #else
 // Signal handling functions, not supported on Windows
+#pragma convert("IBM-1047")
 static void SignalDumpInterruptCallback(Isolate* isolate, void* data) {
   if (report_signal != 0) {
     if (nodereport_verbose) {
@@ -245,7 +246,7 @@ static void SignalDumpInterruptCallback(Isolate* isolate, void* data) {
         fprintf(stdout, "node-report: SignalDumpInterruptCallback triggering report\n");
       }
       TriggerNodeReport(isolate, kSignal_JS,
-                        node::signo_string(report_signal), __func__, nullptr, MaybeLocal<Value>());
+                        signo_string(report_signal), __func__, nullptr, MaybeLocal<Value>());
     }
     report_signal = 0;
   }
@@ -260,11 +261,12 @@ static void SignalDumpAsyncCallback(uv_async_t* handle) {
         fprintf(stdout, "node-report: SignalDumpAsyncCallback triggering NodeReport\n");
       }
       TriggerNodeReport(Isolate::GetCurrent(), kSignal_UV,
-                        node::signo_string(report_signal), __func__, nullptr, MaybeLocal<Value>());
+                        signo_string(report_signal), __func__, nullptr, MaybeLocal<Value>());
     }
     report_signal = 0;
   }
 }
+#pragma convert(pop)
 
 /*******************************************************************************
  * Utility functions for signal handling support (platforms except Windows)
@@ -298,6 +300,7 @@ static void SignalDump(int signo) {
 }
 
 // Utility function to start a watchdog thread - used for processing signals
+#pragma convert("IBM-1047")
 static int StartWatchdogThread(void* (*thread_main)(void* unused)) {
   pthread_attr_t attr;
   pthread_attr_init(&attr);
@@ -327,7 +330,7 @@ inline void* ReportSignalThreadMain(void* unused) {
   for (;;) {
     uv_sem_wait(&report_semaphore);
     if (nodereport_verbose) {
-      fprintf(stdout, "node-report: signal %s received\n", node::signo_string(report_signal));
+      fprintf(stdout, "node-report: signal %s received\n", signo_string(report_signal));
     }
     uv_mutex_lock(&node_isolate_mutex);
     if (auto isolate = node_isolate) {
@@ -365,6 +368,7 @@ static void SetupSignalHandler() {
     signal_thread_initialised = true;
   }
 }
+#pragma convert(pop)
 #endif
 
 /*******************************************************************************
