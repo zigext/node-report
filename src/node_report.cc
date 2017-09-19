@@ -44,11 +44,15 @@
 #include <mach-o/dyld.h>  // _dyld_get_image_name()
 #endif
 
+#pragma warning (disable: 4068)
+
 #ifndef _WIN32
 extern char** environ;
 #endif
 
 namespace nodereport {
+
+#pragma convert("IBM-1047")
 
 using v8::HeapSpaceStatistics;
 using v8::HeapStatistics;
@@ -224,7 +228,14 @@ static void WriteNodeReport(Isolate* isolate, DumpEvent event, const char* messa
   // and header information (event, filename, timestamp and pid)
   out << "================================================================================\n";
   out << "==== Node Report ===============================================================\n";
+#ifdef __MVS__
+  char buf[64];
+  strncpy(buf, message, sizeof(buf));
+  __atoe(buf);
+  out << "\nEvent: " << buf << ", location: \"" << location << "\"\n";
+#else
   out << "\nEvent: " << message << ", location: \"" << location << "\"\n";
+#endif
   if( filename != nullptr ) {
     out << "Filename: " << filename << "\n";
   }
@@ -737,7 +748,14 @@ static void PrintGCStatistics(std::ostream& out, Isolate* isolate) {
   // Loop through heap spaces
   for (size_t i = 0; i < isolate->NumberOfHeapSpaces(); i++) {
     isolate->GetHeapSpaceStatistics(&v8_heap_space_stats, i);
+#ifdef __MVS__
+    char buf[64];
+    strncpy(buf, v8_heap_space_stats.space_name(), sizeof(buf));
+    __atoe(buf);
+    out << "\nHeap space name: " << buf;
+#else
     out << "\nHeap space name: " << v8_heap_space_stats.space_name();
+#endif
     out << "\n    Memory size: ";
     WriteInteger(out, v8_heap_space_stats.space_size());
     out << " bytes, committed memory: ";
@@ -1039,5 +1057,7 @@ static void PrintLoadedLibraries(std::ostream& out, Isolate* isolate) {
   CloseHandle(process_handle);
 #endif
 }
+
+#pragma convert(pop)
 
 }  // namespace nodereport

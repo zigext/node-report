@@ -10,6 +10,8 @@
 #include <sys/procfs.h>  // psinfo_t structure
 #endif
 
+#pragma warning (disable: 4068)
+
 namespace nodereport {
 
 /*******************************************************************************
@@ -33,7 +35,9 @@ unsigned int ProcessNodeReportEvents(const char* args) {
       event_flags |= NR_APICALL;
       cursor += sizeof("apicall") - 1;
     } else {
+#pragma convert("IBM-1047")
       std::cerr << "Unrecognised argument for node-report events option: " << cursor << "\n";
+#pragma convert(pop)
       return 0;
     }
     if (*cursor == '+') {
@@ -59,7 +63,9 @@ unsigned int ProcessNodeReportSignal(const char* args) {
     } else if (!strncmp(args, "SIGQUIT", sizeof("SIGQUIT") - 1)) {
       return SIGQUIT;
     } else {
+#pragma convert("IBM-1047")
      std::cerr << "Unrecognised argument for node-report signal option: "<< args << "\n";
+#pragma convert(pop)
     }
   }
   return SIGUSR2;  // Default signal is SIGUSR2
@@ -69,6 +75,7 @@ unsigned int ProcessNodeReportSignal(const char* args) {
 /*******************************************************************************
  * Function to process node-report config: specification of report file name.
  ******************************************************************************/
+#pragma convert("IBM-1047")
 void ProcessNodeReportFileName(const char* args) {
   if (strlen(args) == 0) {
     std::cerr << "Missing argument for node-report filename option\n";
@@ -95,13 +102,16 @@ void ProcessNodeReportDirectory(const char* args) {
   }
   snprintf(report_directory, sizeof(report_directory), "%s", args);
 }
+#pragma convert(pop)
 
 /*******************************************************************************
  * Function to process node-report config: verbose mode switch.
  ******************************************************************************/
 unsigned int ProcessNodeReportVerboseSwitch(const char* args) {
   if (strlen(args) == 0) {
+#pragma convert("IBM-1047")
     std::cerr << "Missing argument for node-report verbose switch option\n";
+#pragma convert(pop)
     return 0;
   }
   // Parse the supplied switch
@@ -110,7 +120,9 @@ unsigned int ProcessNodeReportVerboseSwitch(const char* args) {
   } else if (!strncmp(args, "no", sizeof("no") - 1) || !strncmp(args, "false", sizeof("false") - 1)) {
     return 0;
   } else {
+#pragma convert("IBM-1047")
     std::cerr << "Unrecognised argument for node-report verbose switch option: " << args << "\n";
+#pragma convert(pop)
   }
   return 0;  // Default is verbose mode off
 }
@@ -142,9 +154,11 @@ void SetVersionString(Isolate* isolate) {
   // e.g. Node.js version: v6.9.1
   if (version->IsString()) {
     Nan::Utf8String node_version(version);
+#pragma convert("IBM-1047")
     version_string = "Node.js version: ";
     version_string += *node_version;
     version_string += "\n";
+#pragma convert(pop)
   }
 
   // Get process.versions
@@ -284,6 +298,7 @@ void SetCommandLine() {
 /*******************************************************************************
  * Utility function to format libuv socket information.
  *******************************************************************************/
+#pragma convert("IBM-1047")
 void reportEndpoints(uv_handle_t* h, std::ostringstream& out) {
   struct sockaddr_storage addr_storage;
   struct sockaddr* addr = (sockaddr*)&addr_storage;
@@ -549,6 +564,7 @@ void WriteInteger(std::ostream& out, size_t value) {
     }
   }
 }
+#pragma convert(pop)
 
 const char *signo_string(int signo) {
 #define SIGNO_CASE(e)  case e: return #e;
@@ -556,156 +572,119 @@ const char *signo_string(int signo) {
 #ifdef SIGHUP
   SIGNO_CASE(SIGHUP);
 #endif
-
 #ifdef SIGINT
   SIGNO_CASE(SIGINT);
 #endif
-
 #ifdef SIGQUIT
   SIGNO_CASE(SIGQUIT);
 #endif
-
 #ifdef SIGILL
   SIGNO_CASE(SIGILL);
 #endif
-
 #ifdef SIGTRAP
   SIGNO_CASE(SIGTRAP);
 #endif
-
 #ifdef SIGABRT
   SIGNO_CASE(SIGABRT);
 #endif
-
 #ifdef SIGIOT
 # if SIGABRT != SIGIOT
   SIGNO_CASE(SIGIOT);
 # endif
 #endif
-
 #ifdef SIGBUS
   SIGNO_CASE(SIGBUS);
 #endif
-
 #ifdef SIGFPE
   SIGNO_CASE(SIGFPE);
 #endif
-
 #ifdef SIGKILL
   SIGNO_CASE(SIGKILL);
 #endif
-
 #ifdef SIGUSR1
   SIGNO_CASE(SIGUSR1);
 #endif
-
 #ifdef SIGSEGV
   SIGNO_CASE(SIGSEGV);
 #endif
-
 #ifdef SIGUSR2
   SIGNO_CASE(SIGUSR2);
 #endif
-
 #ifdef SIGPIPE
   SIGNO_CASE(SIGPIPE);
 #endif
-
 #ifdef SIGALRM
   SIGNO_CASE(SIGALRM);
 #endif
-
   SIGNO_CASE(SIGTERM);
-
 #ifdef SIGCHLD
   SIGNO_CASE(SIGCHLD);
 #endif
-
 #ifdef SIGSTKFLT
   SIGNO_CASE(SIGSTKFLT);
 #endif
-
-
 #ifdef SIGCONT
   SIGNO_CASE(SIGCONT);
 #endif
-
 #ifdef SIGSTOP
   SIGNO_CASE(SIGSTOP);
 #endif
-
 #ifdef SIGTSTP
   SIGNO_CASE(SIGTSTP);
 #endif
-
 #ifdef SIGBREAK
   SIGNO_CASE(SIGBREAK);
 #endif
-
 #ifdef SIGTTIN
   SIGNO_CASE(SIGTTIN);
 #endif
-
 #ifdef SIGTTOU
   SIGNO_CASE(SIGTTOU);
 #endif
-
 #ifdef SIGURG
   SIGNO_CASE(SIGURG);
 #endif
-
 #ifdef SIGXCPU
   SIGNO_CASE(SIGXCPU);
 #endif
-
 #ifdef SIGXFSZ
   SIGNO_CASE(SIGXFSZ);
 #endif
-
 #ifdef SIGVTALRM
   SIGNO_CASE(SIGVTALRM);
 #endif
-
 #ifdef SIGPROF
   SIGNO_CASE(SIGPROF);
 #endif
-
 #ifdef SIGWINCH
   SIGNO_CASE(SIGWINCH);
 #endif
-
 #ifdef SIGIO
   SIGNO_CASE(SIGIO);
 #endif
-
 #ifdef SIGPOLL
 # if SIGPOLL != SIGIO
   SIGNO_CASE(SIGPOLL);
 # endif
 #endif
-
 #ifdef SIGLOST
 # if SIGLOST != SIGABRT
   SIGNO_CASE(SIGLOST);
 # endif
 #endif
-
 #ifdef SIGPWR
 # if SIGPWR != SIGLOST
   SIGNO_CASE(SIGPWR);
 # endif
 #endif
-
 #ifdef SIGINFO
 # if !defined(SIGPWR) || SIGINFO != SIGPWR
   SIGNO_CASE(SIGINFO);
 # endif
 #endif
-
 #ifdef SIGSYS
   SIGNO_CASE(SIGSYS);
 #endif
-
   default: return "";
   }
 }

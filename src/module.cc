@@ -2,6 +2,8 @@
 
 #include <sstream>
 
+#pragma warning (disable: 4068)
+
 namespace nodereport {
 
 // Internal/static function declarations
@@ -343,24 +345,30 @@ inline void* ReportSignalThreadMain(void* unused) {
   }
   return nullptr;
 }
-
+#pragma convert(pop)
 // Utility function to initialise signal handlers and threads
 static void SetupSignalHandler() {
   int rc = uv_sem_init(&report_semaphore, 0);
   if (rc != 0) {
+#pragma convert("IBM-1047")
     fprintf(stderr, "node-report: initialization failed, uv_sem_init() returned %d\n", rc);
+#pragma convert(pop)
     Nan::ThrowError("node-report: initialization failed, uv_sem_init() returned error\n");
   }
   rc = uv_mutex_init(&node_isolate_mutex);
   if (rc != 0) {
+#pragma convert("IBM-1047")
     fprintf(stderr, "node-report: initialization failed, uv_mutex_init() returned %d\n", rc);
+#pragma convert(pop)
     Nan::ThrowError("node-report: initialization failed, uv_mutex_init() returned error\n");
   }
 
   if (StartWatchdogThread(ReportSignalThreadMain) == 0) {
     rc = uv_async_init(uv_default_loop(), &nodereport_trigger_async, SignalDumpAsyncCallback);
     if (rc != 0) {
+#pragma convert("IBM-1047")
       fprintf(stderr, "node-report: initialization failed, uv_async_init() returned %d\n", rc);
+#pragma convert(pop)
       Nan::ThrowError("node-report: initialization failed, uv_async_init() returned error\n");
     }
     uv_unref(reinterpret_cast<uv_handle_t*>(&nodereport_trigger_async));
@@ -368,7 +376,6 @@ static void SetupSignalHandler() {
     signal_thread_initialised = true;
   }
 }
-#pragma convert(pop)
 #endif
 
 /*******************************************************************************
@@ -425,7 +432,7 @@ void Initialize(v8::Local<v8::Object> exports) {
     SetupSignalHandler();
   }
 #endif
-
+#pragma convert(pop)
   exports->Set(Nan::New("triggerReport").ToLocalChecked(),
                Nan::New<v8::FunctionTemplate>(TriggerReport)->GetFunction());
   exports->Set(Nan::New("getReport").ToLocalChecked(),
@@ -440,7 +447,7 @@ void Initialize(v8::Local<v8::Object> exports) {
                Nan::New<v8::FunctionTemplate>(SetDirectory)->GetFunction());
   exports->Set(Nan::New("setVerbose").ToLocalChecked(),
                Nan::New<v8::FunctionTemplate>(SetVerbose)->GetFunction());
-
+#pragma convert("IBM-1047")
   if (nodereport_verbose) {
 #ifdef _WIN32
     fprintf(stdout, "node-report: initialization complete, event flags: %#x\n",
@@ -450,6 +457,7 @@ void Initialize(v8::Local<v8::Object> exports) {
             nodereport_events, nodereport_signal);
 #endif
   }
+#pragma convert(pop)
 }
 
 NODE_MODULE(nodereport, Initialize)
