@@ -154,11 +154,9 @@ void SetVersionString(Isolate* isolate) {
   // e.g. Node.js version: v6.9.1
   if (version->IsString()) {
     Nan::Utf8String node_version(version);
-#pragma convert("IBM-1047")
     version_string = "Node.js version: ";
     version_string += *node_version;
     version_string += "\n";
-#pragma convert(pop)
   }
 
   // Get process.versions
@@ -213,6 +211,14 @@ void SetVersionString(Isolate* isolate) {
     }
   }
   version_string += comp_versions + ")\n";
+#ifdef __MVS__
+  // Convert to EBCDIC
+  char* buffer = (char*) malloc(version_string.length() + 1);
+  strcpy(buffer, version_string.c_str());
+  __atoe(buffer);
+  version_string = buffer;
+  free(buffer);
+#endif
 }
 
 /*******************************************************************************
@@ -234,7 +240,7 @@ void SetLoadTime() {
  * Function to save the process command line. This is called during node-report
  * module initialisation.
  *******************************************************************************/
-void SetCommandLine() {
+void SetCommandLine(Isolate* isolate) {
 #ifdef __linux__
   // Read the command line from /proc/self/cmdline
   char buf[64];
@@ -292,6 +298,52 @@ void SetCommandLine() {
   }
 #elif _WIN32
   commandline_string = GetCommandLine();
+#elif __MVS__
+  // Catch anything thrown and gracefully return
+  Nan::TryCatch trycatch;
+  commandline_string = "";
+
+  // Retrieve the process object
+  v8::Local<v8::String> process_prop;
+  if (!Nan::New<v8::String>("process").ToLocal(&process_prop)) return;
+  v8::Local<v8::Object> global_obj = isolate->GetCurrentContext()->Global();
+  v8::Local<v8::Value> process_value;
+  if (!Nan::Get(global_obj, process_prop).ToLocal(&process_value)) return;
+  if (!process_value->IsObject()) return;
+  v8::Local<v8::Object> process_obj = process_value.As<v8::Object>();
+
+  // Get process.argv0
+  v8::Local<v8::String> argv0_prop;
+  if (!Nan::New<v8::String>("argv0").ToLocal(&argv0_prop)) return;
+  v8::Local<v8::Value> argv0;
+  if (!Nan::Get(process_obj, argv0_prop).ToLocal(&argv0)) return;
+
+  if (argv0->IsString()) {
+    Nan::Utf8String argv0_string(argv0);
+    commandline_string += *argv0_string;
+  }
+
+  // Get process.argv
+  v8::Local<v8::String> argv_prop;
+  if (!Nan::New<v8::String>("argv").ToLocal(&argv_prop)) return;
+  v8::Local<v8::Value> argv;
+  if (!Nan::Get(process_obj, argv_prop).ToLocal(&argv)) return;
+
+/*
+  if (argv->IsArray()) {
+    v8::Local<v8::Array> argv;
+
+  if (argv0->IsString()) {
+    Nan::Utf8String argv0_string(argv0);
+    commandline_string += *argv0_string;
+  }
+*/
+  // Convert to EBCDIC
+  char* buffer = (char*) malloc(commandline_string.length() + 1);
+  strcpy(buffer, commandline_string.c_str());
+  __atoe(buffer);
+  commandline_string = buffer;
+  free(buffer);
 #endif
 }
 

@@ -40,6 +40,9 @@ static struct sigaction saved_sa;  // saved signal action
 static bool exception_hook_initialised = false;
 static bool error_hook_initialised = false;
 static bool signal_thread_initialised = false;
+#ifdef __MVS__
+static bool terminate_loop = false;
+#endif
 
 static v8::Isolate* node_isolate;
 extern std::string version_string;
@@ -342,6 +345,9 @@ inline void* ReportSignalThreadMain(void* unused) {
       uv_async_send(&nodereport_trigger_async);
     }
     uv_mutex_unlock(&node_isolate_mutex);
+#ifdef __MVS__
+    if (terminate_loop) break;  // avoids WARNING CCN1109: Infinite loop detected
+#endif
   }
   return nullptr;
 }
@@ -388,7 +394,7 @@ void Initialize(v8::Local<v8::Object> exports) {
 
   SetLoadTime();
   SetVersionString(isolate);
-  SetCommandLine();
+  SetCommandLine(isolate);
 
   const char* verbose_switch = secure_getenv("NODEREPORT_VERBOSE");
   if (verbose_switch != nullptr) {

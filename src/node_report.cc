@@ -338,8 +338,17 @@ static void PrintVersionInformation(std::ostream& out) {
 
   // Print node-report module version
   // e.g. node-report version: 1.0.6 (built against Node.js v6.9.1)
+#ifdef __MVS__
+  char* buffer = (char*) malloc(strlen(NODE_VERSION_STRING) + 1);
+  strcpy(buffer, NODE_VERSION_STRING);
+  __atoe(buffer);
+  out << std::endl << "node-report version: " << NODEREPORT_VERSION
+      << " (built against Node.js v" << buffer;
+  free(buffer);
+#else
   out << std::endl << "node-report version: " << NODEREPORT_VERSION
       << " (built against Node.js v" << NODE_VERSION_STRING;
+#endif
 #if defined(__GLIBC__)
   out << ", glibc " << __GLIBC__ << "." << __GLIBC_MINOR__;
 #endif
@@ -1055,6 +1064,8 @@ static void PrintLoadedLibraries(std::ostream& out, Isolate* isolate) {
   }
   // Release the handle to the process.
   CloseHandle(process_handle);
+#elif __MVS__
+  out << "  No library information available on zOS\n";
 #endif
 }
 
