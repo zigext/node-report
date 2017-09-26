@@ -302,6 +302,7 @@ void SetCommandLine(Isolate* isolate) {
   // Catch anything thrown and gracefully return
   Nan::TryCatch trycatch;
   commandline_string = "";
+  std::string commandline_options = "";
 
   // Retrieve the process object
   v8::Local<v8::String> process_prop;
@@ -312,15 +313,22 @@ void SetCommandLine(Isolate* isolate) {
   if (!process_value->IsObject()) return;
   v8::Local<v8::Object> process_obj = process_value.As<v8::Object>();
 
-  // Get process.argv0
-  v8::Local<v8::String> argv0_prop;
-  if (!Nan::New<v8::String>("argv0").ToLocal(&argv0_prop)) return;
-  v8::Local<v8::Value> argv0;
-  if (!Nan::Get(process_obj, argv0_prop).ToLocal(&argv0)) return;
+  // Get process.execArgv
+  v8::Local<v8::String> execArgv_prop;
+  if (!Nan::New<v8::String>("execArgv").ToLocal(&execArgv_prop)) return;
+  v8::Local<v8::Value> execArgv;
+  if (!Nan::Get(process_obj, execArgv_prop).ToLocal(&execArgv)) return;
 
-  if (argv0->IsString()) {
-    Nan::Utf8String argv0_string(argv0);
-    commandline_string += *argv0_string;
+  if (execArgv->IsArray()) {
+    v8::Local<v8::Array> execArgv_array = v8::Local<v8::Array>::Cast(execArgv);
+    for (unsigned int i = 0; i < execArgv_array->Length(); i++) {
+      v8::Handle<v8::Value> execArgv_val = execArgv_array->Get(i);
+      if (execArgv_val->IsString()) {
+        Nan::Utf8String execArgv_string(execArgv_val);
+        commandline_options += *execArgv_string;
+        commandline_options += " ";
+      }
+    }
   }
 
   // Get process.argv
@@ -329,15 +337,22 @@ void SetCommandLine(Isolate* isolate) {
   v8::Local<v8::Value> argv;
   if (!Nan::Get(process_obj, argv_prop).ToLocal(&argv)) return;
 
-/*
   if (argv->IsArray()) {
-    v8::Local<v8::Array> argv;
-
-  if (argv0->IsString()) {
-    Nan::Utf8String argv0_string(argv0);
-    commandline_string += *argv0_string;
+    v8::Local<v8::Array> argv_array = v8::Local<v8::Array>::Cast(argv);
+    for (unsigned int i = 0; i < argv_array->Length(); i++) {
+      v8::Handle<v8::Value> argv_val = argv_array->Get(i);
+      if (argv_val->IsString()) {
+        Nan::Utf8String argv_string(argv_val);
+        commandline_string += *argv_string;
+        commandline_string += " ";
+        if (i == 0) {
+          // insert the node.js command line options here
+          commandline_string += commandline_options;
+        }
+      }
+    }
   }
-*/
+
   // Convert to EBCDIC
   char* buffer = (char*) malloc(commandline_string.length() + 1);
   strcpy(buffer, commandline_string.c_str());
@@ -715,24 +730,24 @@ const char *signo_string(int signo) {
   SIGNO_CASE(SIGIO);
 #endif
 #ifdef SIGPOLL
-# if SIGPOLL != SIGIO
+#if SIGPOLL != SIGIO
   SIGNO_CASE(SIGPOLL);
-# endif
+#endif
 #endif
 #ifdef SIGLOST
-# if SIGLOST != SIGABRT
+#if SIGLOST != SIGABRT
   SIGNO_CASE(SIGLOST);
-# endif
+#endif
 #endif
 #ifdef SIGPWR
-# if SIGPWR != SIGLOST
+#if SIGPWR != SIGLOST
   SIGNO_CASE(SIGPWR);
-# endif
+#endif
 #endif
 #ifdef SIGINFO
-# if !defined(SIGPWR) || SIGINFO != SIGPWR
+#if !defined(SIGPWR) || SIGINFO != SIGPWR
   SIGNO_CASE(SIGINFO);
-# endif
+#endif
 #endif
 #ifdef SIGSYS
   SIGNO_CASE(SIGSYS);

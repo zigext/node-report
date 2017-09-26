@@ -193,10 +193,16 @@ bool OnUncaughtException(v8::Isolate* isolate) {
   // On versions earlier than 5.4, V8 does not provide the default behaviour
   // for uncaught exception on return from this callback. Default behaviour is
   // to print a stack trace and exit with rc=1, so we need to mimic that here.
+  char buf[64];
+  strcpy(buf, v8::V8::GetVersion());
+  __atoe(buf);
+  fprintf(stderr, "%s", buf);
   int v8_major, v8_minor;
   if (sscanf(v8::V8::GetVersion(), "%d.%d", &v8_major, &v8_minor) == 2) {
     if (v8_major < 5 || (v8_major == 5 && v8_minor < 4)) {
+#pragma convert("IBM-1047")
       fprintf(stderr, "\nUncaught exception at:\n");
+#pragma convert(pop)
 #ifdef _WIN32
       // On Windows, print the stack using StackTrace API
       PrintStackFromStackTrace(isolate, stderr);
