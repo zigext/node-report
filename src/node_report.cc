@@ -334,12 +334,22 @@ static void PrintCommandLine(std::ostream& out) {
 static void PrintVersionInformation(std::ostream& out) {
 
   // Print Node.js and deps component versions
+#ifdef __MVS__
+  // Convert to EBCDIC
+  char* buffer = (char*) malloc(version_string.length() + 1);
+  strcpy(buffer, version_string.c_str());
+  __atoe(buffer);
+  out << "\n" << buffer;
+  free(buffer);
+#else
   out << "\n" << version_string;
+#endif
 
   // Print node-report module version
   // e.g. node-report version: 1.0.6 (built against Node.js v6.9.1)
 #ifdef __MVS__
-  char* buffer = (char*) malloc(strlen(NODE_VERSION_STRING) + 1);
+  // Convert to EBCDIC
+  buffer = (char*) malloc(strlen(NODE_VERSION_STRING) + 1);
   strcpy(buffer, NODE_VERSION_STRING);
   __atoe(buffer);
   out << std::endl << "node-report version: " << NODEREPORT_VERSION
@@ -429,6 +439,17 @@ static void PrintVersionInformation(std::ostream& out) {
       }
     }
   }
+#elif defined(__MVS__)
+  // Print operating system and machine information (zOS)
+  struct utsname os_info;
+  if (uname(&os_info) >= 0) {
+    out << "\nOS version: " << os_info.sysname << " " << os_info.release << " "
+        << os_info.version << "\n";
+  }
+  char machine_name[256];
+  if (gethostname(machine_name, sizeof(machine_name)) == 0) {
+    out << "\nMachine: " << machine_name << "\n";
+  }
 #else
   // Print operating system and machine information (Unix/OSX)
   struct utsname os_info;
@@ -440,13 +461,11 @@ static void PrintVersionInformation(std::ostream& out) {
     out << "\nOS version: " << os_info.sysname << " " << os_info.release << " "
         << os_info.version << "\n";
 #endif
-#if !defined(__MVS__)
     const char *(*libc_version)();
     *(void**)(&libc_version) = dlsym(RTLD_DEFAULT, "gnu_get_libc_version");
     if (libc_version != NULL) {
       out << "(glibc: " << (*libc_version)() << ")" << std::endl;
     }
-#endif
     out <<  "\nMachine: " << os_info.nodename << " " << os_info.machine << "\n";
   }
 #endif
@@ -522,7 +541,16 @@ static void PrintJavaScriptErrorStack(std::ostream& out, Isolate* isolate, Maybe
 #endif
   Nan::Utf8String message_str(message->Get());
 
+#ifdef __MVS__
+  // Convert to EBCDIC
+  char* buffer = (char*) malloc(strlen(*message_str) + 1);
+  strcpy(buffer, *message_str);
+  __atoe(buffer);
+  out << buffer << "\n\n";
+  free(buffer);
+#else
   out << *message_str << "\n\n";
+#endif
 
   Local<StackTrace> stack = v8::Exception::GetStackTrace(error.ToLocalChecked());
   if (stack.IsEmpty()) {
@@ -596,6 +624,39 @@ static void PrintStackFrame(std::ostream& out, Isolate* isolate, Local<StackFram
   }
 
   // Now print the JavaScript function name and source information
+#ifdef __MVS__
+  // Convert function and script names to EBCDIC
+  char* fn_name_ebcdic = (char*) malloc(strlen(*fn_name_s) + 1);
+  strcpy(fn_name_ebcdic, *fn_name_s);
+  __atoe(fn_name_ebcdic);
+  char* script_name_ebcdic = (char*) malloc(strlen(*script_name) + 1);
+  strcpy(script_name_ebcdic, *fn_name_s);
+  __atoe(script_name_ebcdic);
+
+  if (frame->IsEval()) {
+    if (frame->GetScriptId() == Message::kNoScriptIdInfo) {
+      out << "at [eval]:" << line_number << ":" << column << "\n";
+    } else {
+      out << "at [eval] (" << script_name_ebcdic << ":" << line_number << ":"
+          << column << ")\n";
+    }
+    return;
+  }
+
+  if (fn_name_s.length() == 0) {
+    out << script_name_ebcdic << ":" << line_number << ":" << column << "\n";
+  } else {
+    if (frame->IsConstructor()) {
+      out << fn_name_ebcdic << " [constructor] (" << script_name_ebcdic << ":"
+          << line_number << ":" << column << ")\n";
+    } else {
+      out << fn_name_ebcdic << " (" << script_name_ebcdic << ":" << line_number << ":"
+          << column << ")\n";
+    }
+  }
+  free(fn_name_ebcdic);
+  free(script_name_ebcdic);
+#else
   if (frame->IsEval()) {
     if (frame->GetScriptId() == Message::kNoScriptIdInfo) {
       out << "at [eval]:" << line_number << ":" << column << "\n";
@@ -617,6 +678,7 @@ static void PrintStackFrame(std::ostream& out, Isolate* isolate, Local<StackFram
           << column << ")\n";
     }
   }
+#endif
 }
 
 

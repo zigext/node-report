@@ -97,8 +97,20 @@ NAN_METHOD(GetReport) {
   }
 
   GetNodeReport(isolate, kJavaScript, "JavaScript API", __func__, error, out);
+
+#ifdef __MVS__
+  // Convert report back from EBCDIC to ASCII before returning across JS API
+  std::string report_string = out.str();
+  char* buffer = (char*) malloc(report_string.length() + 1);
+  strcpy(buffer, report_string.c_str());
+  __etoa(buffer);
+  // Return value is the contents of a report as a string.
+  info.GetReturnValue().Set(Nan::New(buffer).ToLocalChecked());
+  free(buffer);
+#else
   // Return value is the contents of a report as a string.
   info.GetReturnValue().Set(Nan::New(out.str()).ToLocalChecked());
+#endif
 }
 
 /*******************************************************************************
@@ -168,6 +180,30 @@ NAN_METHOD(SetVerbose) {
  * external signals
  ******************************************************************************/
 static void OnFatalError(const char* location, const char* message) {
+#ifdef __MVS__
+  char* location_ebcdic = nullptr;
+  char* message_ebcdic = (char*) malloc(strlen(message) + 1);
+  strcpy(message_ebcdic, message);
+  __atoe(message_ebcdic);
+#pragma convert("IBM-1047")
+  if (location) {
+    char* location_ebcdic = (char*) malloc(strlen(location) + 1);
+    strcpy(location_ebcdic, location);
+    __atoe(location_ebcdic);
+    fprintf(stderr, "FATAL ERROR: %s %s\n", location_ebcdic, message_ebcdic);
+  } else {
+    fprintf(stderr, "FATAL ERROR: %s\n", message_ebcdic);
+  }
+  // Trigger report if requested
+  if (nodereport_events & NR_FATALERROR) {
+    TriggerNodeReport(Isolate::GetCurrent(), kFatalError, message, location_ebcdic, nullptr, MaybeLocal<Value>());
+  }
+  if (location) {
+    free(location_ebcdic);
+  }
+  free(message_ebcdic);
+#pragma convert(pop)
+#else
   if (location) {
     fprintf(stderr, "FATAL ERROR: %s %s\n", location, message);
   } else {
@@ -177,6 +213,7 @@ static void OnFatalError(const char* location, const char* message) {
   if (nodereport_events & NR_FATALERROR) {
     TriggerNodeReport(Isolate::GetCurrent(), kFatalError, message, location, nullptr, MaybeLocal<Value>());
   }
+#endif
   fflush(stderr);
   raise(SIGABRT);
 }
@@ -186,6 +223,7 @@ bool OnUncaughtException(v8::Isolate* isolate) {
   if (nodereport_events & NR_EXCEPTION) {
     TriggerNodeReport(isolate, kException, "exception", __func__, nullptr, MaybeLocal<Value>());
   }
+#pragma convert("IBM-1047")
   if ((commandline_string.find("abort-on-uncaught-exception") != std::string::npos) ||
       (commandline_string.find("abort_on_uncaught_exception") != std::string::npos)) {
     return true;  // abort required
@@ -193,16 +231,19 @@ bool OnUncaughtException(v8::Isolate* isolate) {
   // On versions earlier than 5.4, V8 does not provide the default behaviour
   // for uncaught exception on return from this callback. Default behaviour is
   // to print a stack trace and exit with rc=1, so we need to mimic that here.
-  char buf[64];
+  int v8_major, v8_minor;
+#ifdef __MVS__
+  char* buf = (char*) malloc(strlen(v8::V8::GetVersion()) + 1);
   strcpy(buf, v8::V8::GetVersion());
   __atoe(buf);
-  fprintf(stderr, "%s", buf);
-  int v8_major, v8_minor;
+  int rc = sscanf(buf, "%d.%d", &v8_major, &v8_minor);
+  free(buf);
+  if (rc == 2) {
+#else
   if (sscanf(v8::V8::GetVersion(), "%d.%d", &v8_major, &v8_minor) == 2) {
+#endif
     if (v8_major < 5 || (v8_major == 5 && v8_minor < 4)) {
-#pragma convert("IBM-1047")
       fprintf(stderr, "\nUncaught exception at:\n");
-#pragma convert(pop)
 #ifdef _WIN32
       // On Windows, print the stack using StackTrace API
       PrintStackFromStackTrace(isolate, stderr);
@@ -215,6 +256,7 @@ bool OnUncaughtException(v8::Isolate* isolate) {
     }
   }
   return false;
+#pragma convert(pop)
 }
 
 #ifdef _WIN32

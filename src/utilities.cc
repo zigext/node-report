@@ -211,14 +211,6 @@ void SetVersionString(Isolate* isolate) {
     }
   }
   version_string += comp_versions + ")\n";
-#ifdef __MVS__
-  // Convert to EBCDIC
-  char* buffer = (char*) malloc(version_string.length() + 1);
-  strcpy(buffer, version_string.c_str());
-  __atoe(buffer);
-  version_string = buffer;
-  free(buffer);
-#endif
 }
 
 /*******************************************************************************
